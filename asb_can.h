@@ -25,6 +25,11 @@
     #include <mcp_can.h>
     #include <SPI.h>
 
+/**
+* If the same message arrives within DUPLICATE_TIMEOUT (in ms), it is considered a duplicate and filtered out (if enabled)
+*/
+#define DUPLICATE_TIMEOUT 20
+	
     /**
      * Global variable indicating a CAN-bus got a message
      * This is currently shared amongst all CAN-interfaces!
@@ -64,7 +69,55 @@
              * CAN Crystal Frequency
              */
             byte _clockspd = 0;
+			
+            /**
+             * Is the standby pin of the transceiver connected to the MCP2515?
+             */
+            bool _transceiverStandbyMCP2515 = true;
+						
+			/**
+             * Number of the pin connected to the transceiver standby
+             */
+            int _transceiverStandbyPin = -1;
 
+			/**
+             * CAN AutoSleep
+             */
+            bool _autosleep = false;
+			
+			/**
+			 * Time of last activity on the can bus (used for autosleep)
+			 */
+			 unsigned long _lastBusActivity = millis();
+			 
+			 /**
+			 * Keep awake time after last message (in ms, used for autosleep)
+			 */
+			 unsigned int _keepAwakeTime = 200;
+			 
+			 /**
+             * Send wakeup before each message
+             */
+            bool _sendWakeup = false;
+			
+			/**
+             * Pause between wakeup and msg to let the receiving node wake up properly (in ms)
+             */
+            unsigned int _wakeupWaitTime = 100;
+			
+			/*
+			* Enable or disable duplicate filtering
+			*/
+			bool _filterDuplicates = false;
+			
+			/**
+             * _lastId, _lastLen, _lastBuf and _lastMsgTime are used to check for duplicate messages
+             */
+			unsigned long _lastId;
+			int _lastLen = -1;
+			unsigned char _lastBuf[8];
+			unsigned long _lastMsgTime = 0;
+			
         public:
             /**
              * Constructor for NonInterrupt operation
@@ -93,12 +146,67 @@
              */
             byte begin(void);
 
+			/**
+             * AutoSleep: put the CAN controller into sleep mode between sending/receiving
+			 * @param doSleep enable/disable AutoSleep
+			 * @param keepAwakeTime How long should the controller stay awake after last bus activity (default: 200ms)?
+             * @return byte error code
+             * @see https://github.com/Seeed-Studio/CAN_BUS_Shield/blob/master/mcp_can_dfs.h
+             */
+            byte setAutoSleep(bool doSleep, long keepAwakeTime = 200);
+			
+			/**
+             * Wakeup on receiving messages
+			 * @param doWakeup true: enable, false: disable
+             */
+            void setSleepWakeup(bool doWakeup);
+
+			/**
+             * The Rs (standby) pin of the transceiver (mcp2551 or similar) can either be connected to an Arduino output (isMCP2515pin = false) or to the RX0BF/RX1BF pin of the mcp2515 (isMCP2515pin = true). If pin is greater than -1, the transceiver will be put to sleep/standby together with the mcp2515.
+			 Use only after asbCan is already initialized + started!
+			 * @param isMCP2515pin true: connected to MCP2515, false: connected to Arduino
+			 * @param pin -1: disable standby of transceiver, 0-99: pin number
+             */
+            void setTransceiverStandbyPin(bool isMCP2515pin, int pin);					
+			
+			/**
+             * sleep: put the CAN controller (and transceiver) into sleep mode
+			 * @return byte error code
+             * @see https://github.com/Seeed-Studio/CAN_BUS_Shield/blob/master/mcp_can_dfs.h
+             */
+            byte sleep();
+
+			/**
+             * wake: wake the CAN controller (and transceiver) manually from sleep mode
+			 * @return byte error code
+             * @see https://github.com/Seeed-Studio/CAN_BUS_Shield/blob/master/mcp_can_dfs.h
+             */
+            byte wake();
+			
+			/**
+             * Check if MCP2515 is sleeping
+             * @return true if MCP2515 is in MODE_SLEEP
+             */
+			 bool isSleeping();
+			
             /**
+             * SendWakeup: send a wakeup message to the receiving node before each normal message
+			 * @param doSendWakeup enable/disable SendWakeup
+             * @param wakeupWaitTime: pause between wakeup and msg to let the receiving node wake up properly (in ms). Testing shows that 50ms is the minimal value to get reliable reception (MCP2515 + MCP2515 @125kps). Default is 100ms to get a safety margin.
+             */
+            void setSendWakeup(bool doSendWakeup, unsigned int wakeupWaitTime = 100);
+			
+			/**
+             * setfilterDuplicates: If enabled, duplicate messages that arrive within a small time frame (default: 20ms) are ignored. Duplicate messages are likely in a network where most nodes are sleeping. When the MCP2515 wakes up it enters LISTENONLY mode and does not send ACKs, so the transmitter will retransmit the same message a few times until at least one other node on the net is fully woken up.
+			 * @param enable enable/disable duplicate filtering
+             */
+			void setFilterDuplicates(bool enabled);
+			/**
              * Parse CAN-address into our metadata format
              * @param canAddr CAN-address
              * @return asbMeta object containing decoded metadata, targst/source==0x00 on errors
              */
-            asbMeta asbCanAddrParse(unsigned long canAddr);
+			 asbMeta asbCanAddrParse(unsigned long canAddr);
 
             /**
              * Assemble a CAN-address based on our adressing format

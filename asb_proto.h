@@ -35,6 +35,7 @@
     #define ASB_CMD_PER           0x52 //%
     #define ASB_CMD_PING          0x70
     #define ASB_CMD_PONG          0x71
+	#define ASB_CMD_WAKE          0x75 //Wake node from sleep 
     #define ASB_CMD_CFG_READ      0x80 //2-byte address
     #define ASB_CMD_CFG_WRITE     0x81 //2-byte-address + data
     #define ASB_CMD_CFG_COMMIT    0x82 //2-byte-address

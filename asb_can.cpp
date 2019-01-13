@@ -61,6 +61,102 @@
         lastErr = _interface.begin(_speed, _clockspd);
         return lastErr;
     }
+	
+	byte ASB_CAN::setAutoSleep(bool doSleep, long keepAwakeTime) {
+		_autosleep = doSleep;
+		_keepAwakeTime = keepAwakeTime;
+		if(_autosleep && (_interface.checkReceive() != CAN_MSGAVAIL) && (millis() > _lastBusActivity + _keepAwakeTime)) {
+			return sleep();
+		} else {
+			return CAN_OK;
+		}	
+	}
+	
+	void ASB_CAN::setSleepWakeup(bool doWakeup) {
+		_interface.setSleepWakeup(doWakeup);
+	}
+	
+    void ASB_CAN::setTransceiverStandbyPin(bool isMCP2515pin, int pin) {
+		_transceiverStandbyMCP2515 = isMCP2515pin;
+		_transceiverStandbyPin = pin;
+	
+		if(_transceiverStandbyPin > -1) {
+			// config pin as output
+			if(_transceiverStandbyMCP2515) {
+				_interface.mcpPinMode(_transceiverStandbyPin, MCP_PIN_OUT);
+			} else {
+				pinMode(_transceiverStandbyPin, OUTPUT);
+			}
+		
+			// set standby/running
+			if(_transceiverStandbyMCP2515) {
+				_interface.mcpDigitalWrite(_transceiverStandbyPin, (_interface.getMode() == MODE_SLEEP));
+			} else {
+				digitalWrite(_transceiverStandbyPin, (_interface.getMode() == MODE_SLEEP));
+			}
+		}
+	}	
+	
+	byte ASB_CAN::sleep() {
+		byte res;
+		
+		if(!isSleeping()) {
+			#ifdef ASB_DEBUG
+                Serial.print(F("Going to sleep...")); Serial.println(); Serial.flush();
+            #endif
+		
+			// Put MCP2515 into sleep mode
+			res = _interface.sleep();
+		
+			// Put transceiver into standby
+			if((res == MCP2515_OK) && (_transceiverStandbyPin > -1)) {
+				if(_transceiverStandbyMCP2515) {
+					_interface.mcpDigitalWrite(_transceiverStandbyPin, HIGH);
+				} else {
+					digitalWrite(_transceiverStandbyPin, HIGH);
+				}
+			}
+			return res;
+		} else
+			return MCP2515_OK;
+	}
+	
+	byte ASB_CAN::wake() {
+		byte res;
+		
+		// start the keep awake timer
+		_lastBusActivity = millis();
+		
+		#ifdef ASB_DEBUG
+			Serial.print(F("Waking up if necessary...")); Serial.println(); Serial.flush();
+        #endif
+		
+		// wake MCP2515
+		res = _interface.wake();
+		
+		// wake transceiver
+		if((res == MCP2515_OK) && (_transceiverStandbyPin > -1)) {
+			if(_transceiverStandbyMCP2515) {
+				_interface.mcpDigitalWrite(_transceiverStandbyPin, LOW);
+			} else {
+				digitalWrite(_transceiverStandbyPin, LOW);
+			}
+		}
+		return res;
+	}
+	
+	bool ASB_CAN::isSleeping() {
+		return _interface.getMode() == MODE_SLEEP;
+	}
+	
+	void ASB_CAN::setSendWakeup(bool doSendWakeup, unsigned int wakeupWaitTime) {
+		_sendWakeup = doSendWakeup;
+		_wakeupWaitTime = wakeupWaitTime;
+	}
+	
+	void ASB_CAN::setFilterDuplicates(bool enabled) {
+		_filterDuplicates = enabled;
+	}
 
     asbMeta ASB_CAN::asbCanAddrParse(unsigned long canAddr) {
         asbMeta temp;
@@ -115,9 +211,28 @@
     bool ASB_CAN::asbSend(byte type, unsigned int target, unsigned int source, char port, byte len, const byte *data) {
         unsigned long addr = asbCanAddrAssemble(type, target, source, port);
         if(addr == 0) return false;
-
-        lastErr = _interface.sendMsgBuf(addr, 1, len, data);
-        if(lastErr != CAN_OK) return false;
+		 
+        wake(); // make sure the node is running properly
+		
+		// send:
+		if(_sendWakeup) {
+			byte wakedata[1] = {ASB_CMD_WAKE};
+			lastErr = _interface.sendMsgBuf(addr, 1, 1, wakedata);
+			if(lastErr != CAN_OK) {
+			    #ifdef ASB_DEBUG
+					Serial.print(F("Error sending wakeup message")); Serial.println(); Serial.flush();
+				#endif
+				return false;
+			}
+			delay(_wakeupWaitTime);
+		}
+		lastErr = _interface.sendMsgBuf(addr, 1, len, data);
+        
+		// autosleep if necessary
+		if(_autosleep && (millis() > (_lastBusActivity + _keepAwakeTime)))
+			sleep();
+		
+		if(lastErr != CAN_OK) return false;
         return true;
     }
 
@@ -126,19 +241,50 @@
         unsigned long rxId;
         byte len = 0;
         byte rxBuf[8];
+		byte res;
+		
+		if(asb_CANIntReq) { // wake on any activity on the bus, even if no complete message was received
+			// If the nodes wakes automatically from an interrupt, it will still be in a 'half sleeping' state 
+			// (transceiver in standby, MCP2515 in listenonly mode). We have to call "wake()" to insure the node
+			// is running properly.
+			wake();
+			// reset interrupt notification
+			asb_CANIntReq = (digitalRead(_intPin) == LOW);
+		}
 
-        if(_interface.checkReceive() != CAN_MSGAVAIL) return false;
+        if(_interface.checkReceive() != CAN_MSGAVAIL) {
+			// no message available, check for autosleep
+			if(_autosleep && (millis() > (_lastBusActivity + _keepAwakeTime)))
+				sleep();
+			return false;
+		} else {
+			byte state = _interface.readMsgBufID(&rxId, &len, rxBuf);
 
-        byte state = _interface.readMsgBufID(&rxId, &len, rxBuf);
+			if(state != CAN_OK) return false;
+			
+			// check if this is a duplicate message (including a timeout)
+            if(!_filterDuplicates || (rxId != _lastId) || (len != _lastLen) || (millis() > _lastMsgTime + DUPLICATE_TIMEOUT) || (memcmp((const void *)_lastBuf, (const void *)rxBuf, sizeof(rxBuf)) != 0))
+            {
+				if(_filterDuplicates) {
+					_lastId = rxId;
+					_lastLen = len;
+					memcpy(_lastBuf, rxBuf, sizeof(rxBuf));
+					_lastMsgTime = millis();
+				}
 
-        if(state != CAN_OK) return false;
+				pkg.meta = asbCanAddrParse(rxId);
+				pkg.len = len;
 
-        pkg.meta = asbCanAddrParse(rxId);
-        pkg.len = len;
+				for(byte i=0; i<len; i++) pkg.data[i] = rxBuf[i];
 
-        for(byte i=0; i<len; i++) pkg.data[i] = rxBuf[i];
-
-        return true;
+				return true;
+			} else { // was duplicate
+				#ifdef ASB_DEBUG
+					Serial.print(F("Duplicate message ignored.")); Serial.println(); Serial.flush();
+				#endif
+				return false;
+			}
+		}
     }
 
 
