@@ -71,19 +71,25 @@ void setup() {
 
   //Attach the previously defined CAN-Bus to our controller
   Serial.print(F("Attach CAN..."));
-  Serial.print(asb0.busAttach(&asbCan0));
+  if(asb0.busAttach(&asbCan0) < 0) {
+    Serial.println(F("Error attaching CAN-Bus!"));
+  } else {
 
-  // Init Rs
-  asbCan0.setTransceiverStandbyPin(true, MCP_RX0BF);
-
-  // Config sleep + wakeup on new message:
-  asbCan0.setSleepWakeup(false); // do not wake up on incoming messages, making this a "send only" node
-  asbCan0.setAutoSleep(true, 0); // sleep immidiately after sending
-
-  // Sending automated wakeup message to the receiving node(s):
-  asbCan0.setSendWakeup(true);
+    Serial.println(F("CAN-Bus attached"));
+    Serial.println(F("Configure sleep..."));
   
-  Serial.println(F("done!"));
+    // Init Rs
+    asbCan0.setTransceiverStandbyPin(true, MCP_RX0BF);
+
+    // Config sleep + wakeup on new message:
+    asbCan0.setSleepWakeup(false); // do not wake up on incoming messages, making this a "send only" node
+    asbCan0.setAutoSleep(true, 0); // sleep immidiately after sending
+
+    // Sending automated wakeup message to the receiving node(s):
+    asbCan0.setSendWakeup(true);
+  
+    Serial.println(F("done!"));
+  }
 }
 
 void loop() {

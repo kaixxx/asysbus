@@ -149,11 +149,11 @@
 			/**
              * AutoSleep: put the CAN controller into sleep mode between sending/receiving
 			 * @param doSleep enable/disable AutoSleep
-			 * @param keepAwakeTime How long should the controller stay awake after last bus activity (default: 200ms)?
+			 * @param keepAwakeTime How long should the controller stay awake after last bus activity (default: 400ms)? This must be significantly longer than the "wakeupWaitTime" in "setSendWakeup" (see below)
              * @return byte error code
              * @see https://github.com/Seeed-Studio/CAN_BUS_Shield/blob/master/mcp_can_dfs.h
              */
-            byte setAutoSleep(bool doSleep, long keepAwakeTime = 200);
+            byte setAutoSleep(bool doSleep, long keepAwakeTime = 400);
 			
 			/**
              * Wakeup on receiving messages
@@ -192,9 +192,9 @@
             /**
              * SendWakeup: send a wakeup message to the receiving node before each normal message
 			 * @param doSendWakeup enable/disable SendWakeup
-             * @param wakeupWaitTime: pause between wakeup and msg to let the receiving node wake up properly (in ms). Testing shows that 50ms is the minimal value to get reliable reception (MCP2515 + MCP2515 @125kps). Default is 100ms to get a safety margin.
+             * @param wakeupWaitTime: pause between wakeup and msg to let the receiving node wake up properly (in ms). The default of 200ms should give you some safety margin (tested with MCP2515 + MCP2515 @125kps).
              */
-            void setSendWakeup(bool doSendWakeup, unsigned int wakeupWaitTime = 100);
+            void setSendWakeup(bool doSendWakeup, unsigned int wakeupWaitTime = 200);
 			
 			/**
              * setfilterDuplicates: If enabled, duplicate messages that arrive within a small time frame (default: 20ms) are ignored. Duplicate messages are likely in a network where most nodes are sleeping. When the MCP2515 wakes up it enters LISTENONLY mode and does not send ACKs, so the transmitter will retransmit the same message a few times until at least one other node on the net is fully woken up.

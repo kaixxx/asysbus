@@ -33,20 +33,24 @@ void setup() {
   //Attach the previously defined CAN-Bus to our controller
   // (Always attach the CAN bus to the controller before setting any sleep options!)
   Serial.print(F("Attach CAN..."));
-  asb0.busAttach(&asbCan0);
+  if(asb0.busAttach(&asbCan0) < 0) {
+    Serial.println(F("Error attaching CAN-Bus!"));
+  } else {
+    Serial.println(F("CAN-Bus attached"));
+    Serial.println(F("Configure sleep..."));
   
-  // Init Rs
-  Serial.println(F("Init Rs Pin..."));
-  asbCan0.setTransceiverStandbyPin(true, MCP_RX0BF);
+    // Init Rs
+    asbCan0.setTransceiverStandbyPin(true, MCP_RX0BF);
 
-  // Config sleep + wakeup on new message:
-  asbCan0.setSleepWakeup(true);
-  asbCan0.setAutoSleep(true);
+    // Config sleep + wakeup on new message:
+    asbCan0.setSleepWakeup(true);
+    asbCan0.setAutoSleep(true);
 
-  // Ignore duplicate messages
-  asbCan0.setFilterDuplicates(true);
+    // Ignore duplicate messages
+    asbCan0.setFilterDuplicates(true);
 
-  Serial.println(F("done!"));
+    Serial.println(F("done!"));
+  }
 }
 
 void loop() {
